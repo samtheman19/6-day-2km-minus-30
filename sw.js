@@ -1,6 +1,4 @@
-/* Service Worker – force latest files and safe cache updates */
-
-const CACHE_NAME = "treadmill810-cache-v10"; // bump version on each deploy
+const CACHE_NAME = "treadmill810-cache-v11"; // increment version
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,7 +6,7 @@ const ASSETS = [
   "./manifest.json"
 ];
 
-// Install: fetch all assets fresh, bypass cache
+// Install: network-first for HTML/JS
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
@@ -17,9 +15,7 @@ self.addEventListener("install", (event) => {
           try {
             const response = await fetch(asset, { cache: "reload" });
             await cache.put(asset, response.clone());
-          } catch (err) {
-            console.error("Failed to cache", asset, err);
-          }
+          } catch (err) { console.error("Failed to cache", asset, err); }
         })
       );
     }).then(() => self.skipWaiting())
@@ -29,27 +25,22 @@ self.addEventListener("install", (event) => {
 // Activate: remove old caches
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => key !== CACHE_NAME && caches.delete(key))
-      )
+    caches.keys().then(keys =>
+      Promise.all(keys.map(key => key !== CACHE_NAME && caches.delete(key)))
     ).then(() => self.clients.claim())
   );
 });
 
-// Fetch: network-first strategy for HTML/JS, fallback to cache
+// Fetch: network-first for HTML/JS, cache-first for others
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-
   if (req.method !== "GET") return;
 
-  // Force network for HTML and JS files to always get latest
   if (req.url.endsWith("index.html") || req.url.includes("app.js")) {
     event.respondWith(
       fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        .then(res => {
+          caches.open(CACHE_NAME).then(cache => cache.put(req, res.clone()));
           return res;
         })
         .catch(() => caches.match(req))
@@ -57,8 +48,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // For other assets: cache-first, network fallback
-  event.respondWith(
-    caches.match(req).then((cached) => cached || fetch(req))
-  );
+  // Cache-first for other files
+  event.respondWith(caches.match(req).then(cached => cached || fetch(req)));
 });
